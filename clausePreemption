@@ -94,7 +94,8 @@ contract clausePreemption {
 		STATUS_INITIALIZED, // Juste après la création du contrat
 		STATUS_OPEN_TIERCE, // La tierce personne a ouvert un contrat
 		STATUS_OPEN_ASSOCIE, // l'associé a ouvert un contrat
-		STATUS_REDEEMED // L'acheteur a réclamé ses token, fin de vie du contrat
+		STATUS_REDEEMED, // L'acheteur a réclamé ses token, fin de vie du contrat
+		STATUS_CLOSE     // le vendeur réclame 
 	}
 	
 	// Permet d'enregistrer le statut du contrat
@@ -104,6 +105,7 @@ contract clausePreemption {
 	event Initialized(address indexed _cedant, uint256 _quantiteToken);
 	event Opened(address indexed _buyer, uint256 premiumAmount);
 	event Redeemed(address indexed _buyer, uint256 _paymentAmount);
+	event Closed(address indexed _seller);
 
   address public cedant;    // adresse du cedant
   address public tierce;    // adresse de la personne tierce
@@ -117,6 +119,7 @@ contract clausePreemption {
   uint256 public prixToken;     // le prix par action
   uint256 public premiumAmount; // Le montant de token qu'il faut payer pour ouvrir le contrat
   uint256 public temps;         // variable qui va nous servir pour compter la date d'échéance de 3 mois
+  uint256 public paymentAmount; // le paiement de l'acheteur
 
     // Le cédant initie le contrat en indiquant tous les paramètres
   constructor(IERC20 _tokenActif, IERC20 _tokenAchat, uint256 _quantiteToken, uint256 _prixToken, uint256 _premiumAmount, address _tierce) public {
@@ -210,19 +213,21 @@ contract clausePreemption {
 		function redeem() public {
 		   // ce serait mieux que la fonction redeem puisse être utilisé par le vendeur et l'acheteur = chacun récupère son dû en même temps. Le fait que le vendeur puisse être payé dans une fonction différente / avant que le cessionnaire reçoit ses actions rend l'opération moins trustless.
 		    
+		    
 		// On vérifie la validité du contrat
 		require( etatContrat == EtatsContrat.STATUS_OPEN_TIERCE || etatContrat == EtatsContrat.STATUS_OPEN_ASSOCIE, "Contract must be in open state to redeem it");
 		
+
 		// dans le cas où c'est la tierce personne qui a acheté
 		if (etatContrat == EtatsContrat.STATUS_OPEN_TIERCE) {
 		    
 		    require(msg.sender == tierce, "Seul la tierce personne peut réclamer un contrat");
 		   
 		    // Calcul du prix qui doit être payé
-		    uint256 paymentAmount = quantiteToken * prixToken;
+		    paymentAmount = quantiteToken * prixToken;
 		    
-		    // La tierce personne paye le cédant
-		    require(tokenAchat.transferFrom(tierce, cedant, paymentAmount), "Must pay amount * strike to redeem contract");
+		    // La tierce personne envoie son token d'achat au SC
+		    require(tokenAchat.transferFrom(tierce, address(this), paymentAmount), "Must pay amount * strike to redeem contract");
 		   
 		   	// On transfère les actifs à la tierce personne
 		    tokenActif.transfer(tierce, quantiteToken);
@@ -236,15 +241,14 @@ contract clausePreemption {
 		    
 		    //dans le cas où c'est un associé qui a acheté
 		    
-		    
 		} else if (etatContrat == EtatsContrat.STATUS_OPEN_ASSOCIE) {
 		    require(msg.sender == associeAcheteur, "Seul l'associé peut réclamer un contrat");
 		    
 		    // Calcul du prix qui doit être payé
-		    uint256 paymentAmount = quantiteToken * prixToken;
+		    paymentAmount = quantiteToken * prixToken;
 		    
-		    // L'associé paye le cédant
-		    require(tokenAchat.transferFrom(associeAcheteur, cedant, paymentAmount), "Must pay amount * strike to redeem contract");
+		    // L'associé envoie son token d'achat au SC
+		    require(tokenAchat.transferFrom(associeAcheteur, address(this), paymentAmount), "Must pay amount * strike to redeem contract");
 		   
 		   	// On transfère les actifs à l'associé
 		    tokenActif.transfer(associeAcheteur, quantiteToken);
@@ -254,10 +258,30 @@ contract clausePreemption {
 		    
 		    // Emit the event
 		    emit Redeemed(associeAcheteur, paymentAmount);
+		    
 		}
 	}
+	
+    	function payeCedant() public {
+    	    
+    	    // Appelable uniquement par le cédant
+    		require(msg.sender == cedant);
+    		        
+    		    // si un acheteur a bien redeem ses actifs
+    		    if(etatContrat == EtatsContrat.STATUS_REDEEMED){
+    		        
+    		        //  Le cédant récupère l'argent
+    		        tokenAchat.transfer(cedant, paymentAmount);
+    		        
+    		        // On update l'état du contrat
+    		        etatContrat = EtatsContrat.STATUS_CLOSE;
+    		        
+    		        // Emit the event
+		            emit Closed(cedant);
+		            
+    		    }
+	    }
 }
-
 
 
 
